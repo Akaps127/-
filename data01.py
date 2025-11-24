@@ -2,9 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+import folium
+from streamlit_folium import st_folium
+# W03_env\Scripts\activate.bat 시작할 때 터미널에 치기 
 
+from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+
 
 # =========================
 # 기본 설정
@@ -102,7 +107,7 @@ selected_dong = "전체"
 with st.sidebar.expander("① 기본 선택", expanded=True):
     page = st.radio(
         "페이지 선택",
-        ["서울 전체 요약", "구별 분석", "이상 거래 탐색", "클러스터링 분석"]
+        ["서울 전체 요약", "구별 분석", "이상 거래 탐색", "클러스터링 분석", "요인 분석"]
     )
 
     if page != "서울 전체 요약":
@@ -128,7 +133,7 @@ with st.sidebar.expander("① 기본 선택", expanded=True):
 with st.sidebar.expander("② 세부 필터", expanded=(page != "서울 전체 요약")):
     # 전월세 구분
     all_type = sorted(df["전월세구분"].dropna().unique())
-    if page == "구별 분석":
+    if page in ["구별 분석", "요인 분석"]:
         selected_type = st.multiselect(
             "전월세 구분",
             options=all_type,
@@ -570,10 +575,252 @@ elif page == "이상 거래 탐색":
                     anomalies_t3.to_csv(index=False).encode("utf-8-sig"),
                     file_name=f"{selected_gu}_{selected_dong}_이상거래_로컬고가.csv"
                 )
+                st.write("#### 🗺 로컬 평균 대비 고가 거래 지도(구 중심 좌표 기반)")
+
+                # 서울 각 구의 대략적인 중심 좌표 (위도, 경도)
+                seoul_gu_coords = {
+                    "강남구": (37.5172, 127.0473),
+                    "서초구": (37.4836, 127.0327),
+                    "송파구": (37.5145, 127.1066),
+                    "용산구": (37.5311, 126.9810),
+                    "중구": (37.5636, 126.9976),
+                    "종로구": (37.5730, 126.9794),
+                    "마포구": (37.5663, 126.9014),
+                    "영등포구": (37.5263, 126.8962),
+                    "양천구": (37.5169, 126.8665),
+                    "강서구": (37.5509, 126.8495),
+                    "구로구": (37.4954, 126.8874),
+                    "금천구": (37.4569, 126.8959),
+                    "관악구": (37.4784, 126.9516),
+                    "동작구": (37.5124, 126.9393),
+                    "동대문구": (37.5740, 127.0396),
+                    "성동구": (37.5634, 127.0369),
+                    "광진구": (37.5384, 127.0823),
+                    "성북구": (37.5894, 127.0167),
+                    "강북구": (37.6396, 127.0257),
+                    "도봉구": (37.6688, 127.0471),
+                    "노원구": (37.6543, 127.0565),
+                    "중랑구": (37.6063, 127.0928),
+                    "서대문구": (37.5791, 126.9368),
+                    "은평구": (37.6176, 126.9227),
+                    "강동구": (37.5301, 127.1238),
+                }
+
+                # 구별 고가 거래 비율 계산 (현재 필터 내에서)
+                if len(t3) > 0:
+                    gu_counts = t3["구"].value_counts().rename("전체거래수")
+                    gu_anom_counts = anomalies_t3["구"].value_counts().rename("고가거래수")
+
+                    gu_ratio = (
+                        pd.concat([gu_counts, gu_anom_counts], axis=1)
+                        .fillna(0)
+                        .reset_index()
+                        .rename(columns={"index": "구"})
+                    )
+                    gu_ratio["고가비율(%)"] = (
+                        gu_ratio["고가거래수"] / gu_ratio["전체거래수"] * 100
+                    )
+
+                    # 지도 중심은 선택된 구가 있으면 그쪽, 없으면 서울 시청 근처
+                    if selected_gu in seoul_gu_coords:
+                        center_lat, center_lng = seoul_gu_coords[selected_gu]
+                    else:
+                        center_lat, center_lng = 37.5665, 126.9780  # 서울 시청 근방
+
+                    m = folium.Map(location=[center_lat, center_lng], zoom_start=11)
+
+                    # 구별로 원(circle) 표시
+                    for _, row in gu_ratio.iterrows():
+                        gu_name = row["구"]
+                        if gu_name not in seoul_gu_coords:
+                            continue
+
+                        lat, lng = seoul_gu_coords[gu_name]
+                        ratio = row["고가비율(%)"]
+
+                        # 비율에 따라 원 크기 조절 (기본 200 + 가중)
+                        radius = 200 + ratio * 10
+
+                        popup_text = (
+                            f"{gu_name}<br>"
+                            f"고가 거래수: {int(row['고가거래수'])}건<br>"
+                            f"전체 거래수: {int(row['전체거래수'])}건<br>"
+                            f"고가 비율: {ratio:.1f}%"
+                        )
+
+                        folium.Circle(
+                            location=[lat, lng],
+                            radius=radius,
+                            popup=popup_text,
+                            color="red",
+                            fill=True,
+                            fill_opacity=0.5,
+                        ).add_to(m)
+
+                    st_folium(m, width=700, height=500)
+                else:
+                    st.info("지도 시각화를 위한 비교 대상 데이터가 부족합니다.")
+
+# =========================
+# 7. 페이지 4: 요인 분석 (다중요인 영향)
+# =========================
+elif page == "요인 분석":
+    title_suffix = "" if selected_dong == "전체" else f" ({selected_dong})"
+    st.header(f"📊 요인별 임대료 영향 분석 – {selected_gu}{title_suffix}")
+
+    base = apply_common_filters(df, gu=selected_gu, dong=selected_dong)
+
+    st.caption("※ 현재 선택된 구/동 및 필터(전월세, 면적, 건축년도, 갱신 여부)에 해당하는 데이터만 사용합니다.")
+
+    if len(base) < 30:
+        st.info("요인 분석을 진행하기에 데이터가 충분하지 않습니다. 필터를 완화해 보세요.")
+    else:
+        tab_corr, tab_reg = st.tabs(["상관 분석", "회귀 분석"])
+
+        # -------------------------
+        # TAB 1: 상관 분석
+        # -------------------------
+        with tab_corr:
+            st.subheader("① 주요 수치 변수 간 상관관계")
+
+            corr_cols = [
+                "전용면적(㎡)",
+                "보증금(만원)",
+                "월세금(만원)",
+                "전용면적당 월세(만원/㎡)",
+                "층",
+                "건축년도",
+            ]
+
+            use_cols = [c for c in corr_cols if c in base.columns]
+            data_corr = base[use_cols].dropna()
+
+            if data_corr.shape[0] < 10:
+                st.info("상관 분석을 위한 유효한 데이터가 부족합니다.")
+            else:
+                corr = data_corr.corr()
+
+                st.write("##### 상관계수 표")
+                st.dataframe(corr.style.background_gradient(cmap="RdBu_r"))
+
+                st.write("##### 상관계수 히트맵")
+
+                corr_reset = corr.reset_index()
+                first_col = corr_reset.columns[0]
+
+                corr_melt = (
+                    corr_reset
+                    .rename(columns={first_col: "변수1"})
+                    .melt("변수1", var_name="변수2", value_name="상관계수")
+                )
+
+                heatmap = (
+                    alt.Chart(corr_melt)
+                    .mark_rect()
+                    .encode(
+                        x=alt.X("변수1:N", title=""),
+                        y=alt.Y("변수2:N", title=""),
+                        color=alt.Color("상관계수:Q", scale=alt.Scale(scheme="redblue")),
+                        tooltip=["변수1", "변수2", "상관계수"]
+                    )
+                )
+
+                text = (
+                    alt.Chart(corr_melt)
+                    .mark_text(baseline="middle")
+                    .encode(
+                        x="변수1:N",
+                        y="변수2:N",
+                        text=alt.Text("상관계수:Q", format=".2f")
+                    )
+                )
+
+                st.altair_chart(heatmap + text, use_container_width=True)
+
+        # -------------------------
+        # TAB 2: 회귀 분석
+        # -------------------------
+        with tab_reg:
+            st.subheader("② 다중 회귀 분석")
+
+            target = st.radio(
+                "종속 변수(설명하고 싶은 임대료)를 선택하세요.",
+                ["월세금(만원)", "보증금(만원)"],
+                index=0
+            )
+
+            data_reg = base.copy()
+
+            # 종속 변수에 맞게 거래 필터링
+            if target == "월세금(만원)":
+                data_reg = data_reg[data_reg["월세금(만원)"] > 0]
+            else:
+                data_reg = data_reg[data_reg["보증금(만원)"] > 0]
+
+            # 사용할 설명 변수들
+            num_features = []
+            for col in ["전용면적(㎡)", "층", "건축년도", "전용면적당 월세(만원/㎡)"]:
+                if col in data_reg.columns:
+                    num_features.append(col)
+
+            cat_features = []
+            for col in ["구", "계약구분", "전월세구분"]:
+                if col in data_reg.columns:
+                    cat_features.append(col)
+
+            if target not in data_reg.columns or len(num_features) == 0:
+                st.info("회귀분석에 필요한 컬럼이 부족합니다.")
+            else:
+                # X, y 구성
+                X = data_reg[num_features + cat_features].copy()
+                y = data_reg[target].copy()
+
+                # 원-핫 인코딩
+                if cat_features:
+                    X = pd.get_dummies(X, columns=cat_features, drop_first=True)
+
+                # 결측치 제거
+                reg_df = pd.concat([X, y], axis=1).dropna()
+                X = reg_df[X.columns]
+                y = reg_df[target]
+
+                if X.shape[0] < 50 or X.shape[1] == 0:
+                    st.info("회귀 분석을 수행하기에 유효한 데이터(표본 수)가 부족합니다.")
+                else:
+                    model = LinearRegression()
+                    model.fit(X, y)
+
+                    r2 = model.score(X, y)
+
+                    st.write("##### 모델 요약")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("표본 수", f"{X.shape[0]:,} 건")
+                    with col2:
+                        st.metric("결정계수 (R²)", f"{r2:.3f}")
+
+                    coef_series = pd.Series(model.coef_, index=X.columns)
+                    coef_df = (
+                        pd.DataFrame({
+                            "변수": coef_series.index,
+                            "회귀계수": coef_series.values,
+                            "절대값": coef_series.abs().values
+                        })
+                        .sort_values("절대값", ascending=False)
+                    )[["변수", "회귀계수"]]
+
+                    st.write("##### 변수별 영향력 (계수 크기 기준 정렬)")
+                    st.dataframe(coef_df)
+
+                    st.caption("""
+- 회귀계수가 양수이면, 해당 변수가 증가할수록 임대료가 증가하는 방향입니다.  
+- 음수이면, 해당 변수가 증가할수록 임대료가 감소하는 방향입니다.  
+- R² 값은 이 모델이 임대료 변동을 얼마나 설명하는지를 나타냅니다.
+""")
 
 
 # =========================
-# 7. 페이지 4: 클러스터링 분석 (구 + 동)
+# 8. 페이지 4: 클러스터링 분석 (구 + 동)
 # =========================
 elif page == "클러스터링 분석":
     title_suffix = "" if selected_dong == "전체" else f" ({selected_dong})"
