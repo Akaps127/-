@@ -7,8 +7,14 @@ from streamlit_folium import st_folium
 import matplotlib.pyplot as plt
 from scipy import stats
 import io
+import matplotlib.font_manager as fm 
+import os 
+font_path = os.path.join(os.path.dirname(__file__), "fonts", "NanumGothic.ttf")
 
-plt.rcParams["font.family"] = "Malgun Gothic"
+# 폰트 등록
+fm.fontManager.addfont(font_path)
+font_prop = fm.FontProperties(fname = font_path)
+plt.rcParams["font.family"] = font_prop.get_name()
 plt.rcParams["axes.unicode_minus"] = False
 
 # 가상환경 진입: W03_env\Scripts\activate.bat
