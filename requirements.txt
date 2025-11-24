@@ -1,10 +1,10 @@
 streamlit
 pandas
 numpy
-scikit-learn
 altair
 folium
 streamlit-folium
-pydeck
 matplotlib
-seaborn
+scipy
+scikit-learn
+
