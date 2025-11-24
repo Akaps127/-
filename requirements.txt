@@ -1,5 +1,10 @@
+streamlit
 pandas
 numpy
-streamlit
-altair
 scikit-learn
+altair
+folium
+streamlit-folium
+pydeck
+matplotlib
+seaborn
