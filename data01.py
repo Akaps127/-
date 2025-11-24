@@ -4,7 +4,14 @@ import numpy as np
 import altair as alt
 import folium
 from streamlit_folium import st_folium
-# W03_env\Scripts\activate.bat 시작할 때 터미널에 치기 
+import matplotlib.pyplot as plt
+from scipy import stats
+import io
+
+plt.rcParams["font.family"] = "Malgun Gothic"
+plt.rcParams["axes.unicode_minus"] = False
+
+# 가상환경 진입: W03_env\Scripts\activate.bat
 
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
@@ -22,7 +29,7 @@ st.set_page_config(
 st.title("서울 오피스텔 전월세 실거래 분석 대시보드 (리빌딩 Ver.)")
 
 st.caption("""
-- 페이지 구조: **서울 전체 요약 → 구별 분석 → 이상 거래 탐색 → 클러스터링 분석**  
+- 페이지 구조: **서울 전체 요약 → 구별 분석 → 이상 거래 탐색 → 클러스터링 분석 → 요인 분석(수업기반)**  
 - 월세 관련 분석은 **월세금(만원) > 0인 거래(실제 월세)**만 사용하고,  
   월세 0원인 전세 거래는 **전세 전용 통계**에만 포함됩니다.
 """)
@@ -33,18 +40,10 @@ st.caption("""
 # =========================
 @st.cache_data
 def load_data():
-    # CSV 경로: data01.py와 같은 폴더에 있으면 파일명만 쓰면 됨
-    # csv_path = "오피스텔(전월세)_실거래가_20251119142716.csv"
-    csv_path = "오피스텔(전월세)_실거래가_20251119142716.csv"
+    csv_path = "officetel_with_station_500m.csv"
+    df = pd.read_csv(csv_path, encoding="utf-8-sig")
 
-    raw = pd.read_csv(csv_path, encoding="cp949", skiprows=7)
-
-    # 첫 행을 컬럼명으로
-    header = raw.iloc[0]
-    df = raw[1:].copy()
-    df.columns = header
-
-    # 숫자형 컬럼 처리
+    # 숫자형(금액) 컬럼 처리
     money_cols = ["보증금(만원)", "월세금(만원)", "종전계약 보증금(만원)", "종전계약 월세(만원)"]
     for col in money_cols:
         if col in df.columns:
@@ -63,15 +62,11 @@ def load_data():
     if "전용면적(㎡)" in df.columns:
         df["전용면적(㎡)"] = pd.to_numeric(df["전용면적(㎡)"], errors="coerce")
 
-    # ------------------------
-    # 시군구 → 시도 / 구 / 동 분리
-    # 예: "서울특별시 강남구 논현동"
-    # ------------------------
+    # 시군구 → 시도 / 구 / 동 분리 (예: "서울특별시 강남구 논현동")
     if "시군구" in df.columns:
         loc = df["시군구"].astype(str).str.split()
         df["시도"] = loc.str[0]
         df["구"] = loc.str[1]
-        # 동이 없는 경우도 있을 수 있으니, 예외적으로 NaN 될 수 있음
         df["동"] = loc.str[2]
 
     # 전용면적당 월세: 월세가 있는 거래만
@@ -128,6 +123,20 @@ with st.sidebar.expander("① 기본 선택", expanded=True):
             options=["전체"] + dongs_in_gu,
             index=0
         )
+
+
+# 위치 라벨 함수
+def get_loc_label(gu, dong):
+    if gu is None:
+        return "서울 전체"
+    elif dong == "전체":
+        return f"{gu}"
+    else:
+        return f"{gu} {dong}"
+
+
+loc_label = get_loc_label(selected_gu, selected_dong)
+
 
 # ② 세부 필터
 with st.sidebar.expander("② 세부 필터", expanded=(page != "서울 전체 요약")):
@@ -220,13 +229,13 @@ def apply_common_filters(df_in, gu=None, dong="전체"):
 if page == "서울 전체 요약":
     st.header("📍 서울 전체 요약")
 
-    st.write("#### 🔍 원본 데이터 샘플")
+    st.write("#### 🔍 원본 데이터 샘플 (서울 전체 기준)")
     st.dataframe(df.head())
 
     st.write("---")
-    st.subheader("🏙️ 구별 전월세 거래 요약")
+    st.subheader("🏙️ 구별 전월세 거래 요약 (서울 전체 기준)")
 
-    # 월세 거래만 별도
+    # 월세 / 전세 거래
     df_rent = df[df["월세금(만원)"] > 0]
     df_jeonse = df[df["월세금(만원)"] == 0]
 
@@ -258,7 +267,7 @@ if page == "서울 전체 요약":
         file_name="서울_구별_요약.csv"
     )
 
-    st.write("#### 📊 구별 평균 월세 (월세 거래만)")
+    st.write("#### 📊 구별 평균 월세 (월세 거래만, 서울 전체 기준)")
 
     if len(df_rent) > 0:
         avg_rent_by_gu = (
@@ -275,12 +284,13 @@ if page == "서울 전체 요약":
                 y=alt.Y("월세금(만원):Q", title="평균 월세 (만원)"),
                 tooltip=["구", "월세금(만원)"]
             )
+            .properties(title="구별 평균 월세 (서울 전체 기준)")
         )
         st.altair_chart(chart, use_container_width=True)
     else:
         st.info("월세 거래 데이터가 없습니다.")
 
-    st.write("#### 🏢 전세(월세 0원) 거래 비중")
+    st.write("#### 🏢 전세(월세 0원) 거래 비중 (서울 전체 기준)")
     jeonse_ratio = len(df_jeonse) / len(df) * 100 if len(df) > 0 else 0
     st.metric("전세(월세 0원) 비중", f"{jeonse_ratio:,.1f}%")
 
@@ -293,7 +303,7 @@ if page == "서울 전체 요약":
 # =========================
 elif page == "구별 분석":
     title_suffix = "" if selected_dong == "전체" else f" ({selected_dong})"
-    st.header(f"🏙️ {selected_gu}{title_suffix} 상세 분석")
+    st.header(f"🏙️ {loc_label} 상세 분석")
 
     filtered = apply_common_filters(df, gu=selected_gu, dong=selected_dong)
 
@@ -306,7 +316,7 @@ elif page == "구별 분석":
 
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("전체 거래 건수", f"{len(filtered):,} 건")
+            st.metric(f"{loc_label} 전체 거래 건수", f"{len(filtered):,} 건")
         with col2:
             st.metric("월세 거래 수", f"{len(rent_df):,} 건")
         with col3:
@@ -316,20 +326,115 @@ elif page == "구별 분석":
             st.metric("평균 보증금 (만원)", f"{avg_deposit:,.0f}")
 
         st.write("---")
-        st.subheader("💰 월세 거래 분포 (월세 > 0인 거래만)")
+        st.subheader(f"💰 월세 거래 분포 (월세 > 0인 거래만, {loc_label} 기준)")
 
         if len(rent_df) > 0:
-            # 월세 히스토그램
-            rent_hist = (
-                alt.Chart(rent_df)
-                .mark_bar()
-                .encode(
-                    x=alt.X("월세금(만원):Q", bin=alt.Bin(maxbins=30), title="월세 (만원)"),
-                    y=alt.Y("count():Q", title="거래 건수"),
-                    tooltip=["count()"]
+            data = rent_df["월세금(만원)"].dropna()
+
+            if data.empty:
+                st.info("유효한 월세 데이터가 없습니다.")
+            else:
+                view = st.radio(
+                    "표현 방식 선택",
+                    ["히스토그램", "박스플롯", "Q-Q Plot (고급)"],
+                    index=0,
+                    horizontal=True
                 )
-            )
-            st.altair_chart(rent_hist, use_container_width=True)
+
+                # 1) 히스토그램 (Altair + PNG 다운로드)
+                if view == "히스토그램":
+                    rent_hist = (
+                        alt.Chart(rent_df)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X(
+                                "월세금(만원):Q",
+                                bin=alt.Bin(maxbins=30),
+                                title="월세 (만원)"
+                            ),
+                            y=alt.Y("count():Q", title="거래 건수"),
+                            tooltip=["count()"]
+                        )
+                        .properties(title=f"월세 히스토그램 ({loc_label} 기준)")
+                    )
+                    st.altair_chart(rent_hist, use_container_width=True)
+
+                    fig, ax = plt.subplots()
+                    ax.hist(data, bins=30)
+                    ax.set_title(f"{loc_label} Monthly Rent Histogram")
+                    ax.set_xlabel("Monthly Rent (10k KRW)")
+                    ax.set_ylabel("Number of contracts")
+
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", bbox_inches="tight")
+                    buf.seek(0)
+
+                    st.download_button(
+                        label="Download Histogram (PNG)",
+                        data=buf,
+                        file_name=f"{loc_label}_rent_histogram.png",
+                        mime="image/png"
+                    )
+
+                # 2) Boxplot
+                elif view == "박스플롯":
+                    fig, ax = plt.subplots()
+                    ax.boxplot(data, vert=True, showfliers=True)
+                    ax.set_title(f"{loc_label} Monthly Rent Boxplot")
+                    ax.set_ylabel("Monthly Rent (10k KRW)")
+                    ax.set_xticklabels(["All contracts"])
+
+                    st.pyplot(fig)
+
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", bbox_inches="tight")
+                    buf.seek(0)
+
+                    st.download_button(
+                        label="Download Boxplot (PNG)",
+                        data=buf,
+                        file_name=f"{loc_label}_rent_boxplot.png",
+                        mime="image/png"
+                    )
+
+                # 3) Q-Q Plot
+                elif view == "Q-Q Plot (고급)":
+                    fig, ax = plt.subplots()
+                    (theoretical_q, ordered_vals), (slope, intercept, r) = stats.probplot(
+                        data, dist="norm", fit=True
+                    )
+
+                    ax.scatter(
+                        theoretical_q,
+                        ordered_vals,
+                        alpha=0.7,
+                        label="Observed rents"
+                    )
+                    fitted_line = slope * theoretical_q + intercept
+                    ax.plot(
+                        theoretical_q,
+                        fitted_line,
+                        color="red",
+                        linewidth=2,
+                        label="Reference line (normal fit)"
+                    )
+
+                    ax.set_title(f"Q-Q Plot of Monthly Rent ({loc_label})")
+                    ax.set_xlabel("Expected values under normality")
+                    ax.set_ylabel("Observed monthly rent (10k KRW)")
+                    ax.legend(loc="best")
+                    st.pyplot(fig)
+
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", bbox_inches="tight")
+                    buf.seek(0)
+
+                    st.download_button(
+                        label="Download Q-Q Plot (PNG)",
+                        data=buf,
+                        file_name=f"{loc_label}_rent_qqplot.png",
+                        mime="image/png"
+                    )
 
             # 전용면적 vs 월세 산점도
             if {"전용면적(㎡)", "월세금(만원)"}.issubset(rent_df.columns):
@@ -337,8 +442,8 @@ elif page == "구별 분석":
                     alt.Chart(rent_df)
                     .mark_circle(size=60, opacity=0.6)
                     .encode(
-                        x=alt.X("전용면적(㎡):Q"),
-                        y=alt.Y("월세금(만원):Q"),
+                        x=alt.X("전용면적(㎡):Q", title="전용면적(㎡)"),
+                        y=alt.Y("월세금(만원):Q", title="월세(만원)"),
                         tooltip=[
                             "구", "동",
                             "단지명",
@@ -351,6 +456,7 @@ elif page == "구별 분석":
                             "계약년월"
                         ]
                     )
+                    .properties(title=f"전용면적 vs 월세 산점도 ({loc_label} 기준)")
                 )
                 st.write("#### 📈 전용면적 vs 월세 (월세 거래만)")
                 st.altair_chart(scatter, use_container_width=True)
@@ -372,7 +478,7 @@ elif page == "구별 분석":
 # =========================
 elif page == "이상 거래 탐색":
     title_suffix = "" if selected_dong == "전체" else f" ({selected_dong})"
-    st.header(f"⚠ 이상 거래 탐색 – {selected_gu}{title_suffix}")
+    st.header(f"⚠ 이상 거래 탐색 – {loc_label}")
 
     base = apply_common_filters(df, gu=selected_gu, dong=selected_dong)
     rent_base = base[base["월세금(만원)"] > 0]  # 월세 거래만
@@ -388,11 +494,9 @@ elif page == "이상 거래 탐색":
             "③ 로컬 평균 대비 고가"
         ])
 
-        # -------------------------
         # TAB 1: 보증금 대비 월세 비율
-        # -------------------------
         with tab1:
-            st.subheader("① 보증금 대비 월세 비율이 높은 거래")
+            st.subheader(f"① 보증금 대비 월세 비율이 높은 거래 ({loc_label} 기준)")
 
             t1 = rent_base.copy()
             t1 = t1[(t1["보증금(만원)"] > 0)].copy()
@@ -434,11 +538,9 @@ elif page == "이상 거래 탐색":
                     file_name=f"{selected_gu}_{selected_dong}_이상거래_비율기준.csv"
                 )
 
-        # -------------------------
         # TAB 2: 갱신 시 인상률
-        # -------------------------
         with tab2:
-            st.subheader("② 갱신 계약 중 월세 인상률이 큰 거래")
+            st.subheader(f"② 갱신 계약 중 월세 인상률이 큰 거래 ({loc_label} 기준)")
 
             needed = {"계약구분", "월세금(만원)", "종전계약 월세(만원)"}
             if not needed.issubset(base.columns):
@@ -501,11 +603,9 @@ elif page == "이상 거래 탐색":
                             file_name=f"{selected_gu}_{selected_dong}_이상거래_갱신인상률.csv"
                         )
 
-        # -------------------------
         # TAB 3: 로컬 평균 대비 고가
-        # -------------------------
         with tab3:
-            st.subheader("③ 비슷한 면적대 로컬 평균 대비 고가 거래")
+            st.subheader(f"③ 비슷한 면적대 로컬 평균 대비 고가 거래 ({loc_label} 기준)")
 
             t3 = rent_base.dropna(subset=["전용면적(㎡)", "월세금(만원)"]).copy()
 
@@ -575,6 +675,7 @@ elif page == "이상 거래 탐색":
                     anomalies_t3.to_csv(index=False).encode("utf-8-sig"),
                     file_name=f"{selected_gu}_{selected_dong}_이상거래_로컬고가.csv"
                 )
+
                 st.write("#### 🗺 로컬 평균 대비 고가 거래 지도(구 중심 좌표 기반)")
 
                 # 서울 각 구의 대략적인 중심 좌표 (위도, 경도)
@@ -621,15 +722,15 @@ elif page == "이상 거래 탐색":
                         gu_ratio["고가거래수"] / gu_ratio["전체거래수"] * 100
                     )
 
-                    # 지도 중심은 선택된 구가 있으면 그쪽, 없으면 서울 시청 근처
+                    # 지도 중심
                     if selected_gu in seoul_gu_coords:
                         center_lat, center_lng = seoul_gu_coords[selected_gu]
                     else:
-                        center_lat, center_lng = 37.5665, 126.9780  # 서울 시청 근방
+                        center_lat, center_lng = 37.5665, 126.9780  # 서울 시청
 
                     m = folium.Map(location=[center_lat, center_lng], zoom_start=11)
 
-                    # 구별로 원(circle) 표시
+                    # 구별로 원 표시
                     for _, row in gu_ratio.iterrows():
                         gu_name = row["구"]
                         if gu_name not in seoul_gu_coords:
@@ -638,7 +739,6 @@ elif page == "이상 거래 탐색":
                         lat, lng = seoul_gu_coords[gu_name]
                         ratio = row["고가비율(%)"]
 
-                        # 비율에 따라 원 크기 조절 (기본 200 + 가중)
                         radius = 200 + ratio * 10
 
                         popup_text = (
@@ -661,170 +761,322 @@ elif page == "이상 거래 탐색":
                 else:
                     st.info("지도 시각화를 위한 비교 대상 데이터가 부족합니다.")
 
+
 # =========================
-# 7. 페이지 4: 요인 분석 (다중요인 영향)
+# 7. 페이지 4: 요인 분석 (수업 기반 분석)
 # =========================
 elif page == "요인 분석":
-    title_suffix = "" if selected_dong == "전체" else f" ({selected_dong})"
-    st.header(f"📊 요인별 임대료 영향 분석 – {selected_gu}{title_suffix}")
+    st.header("📊 요인별 임대료 영향 분석 (수업 기반)")
 
-    base = apply_common_filters(df, gu=selected_gu, dong=selected_dong)
+    # 분석 범위 선택: 현재 구/동 vs 서울 전체
+    scope = st.radio(
+        "분석 범위 선택",
+        ["현재 선택된 구/동 기준", "서울 전체 기준"],
+        index=0,
+        horizontal=True
+    )
 
-    st.caption("※ 현재 선택된 구/동 및 필터(전월세, 면적, 건축년도, 갱신 여부)에 해당하는 데이터만 사용합니다.")
+    if scope == "서울 전체 기준":
+        base = apply_common_filters(df, gu=None, dong="전체")
+        scope_loc_label = "서울 전체"
+    else:
+        base = apply_common_filters(df, gu=selected_gu, dong=selected_dong)
+        scope_loc_label = get_loc_label(selected_gu, selected_dong)
+
+    st.caption(f"""
+※ 분석 범위: **{scope_loc_label}** 기준입니다.  
+※ 전월세, 면적, 건축년도, 갱신 여부 필터가 모두 적용된 데이터만 사용합니다.  
+※ 월세 관련 분석은 월세금(만원) > 0인 거래만 사용합니다.
+""")
 
     if len(base) < 30:
         st.info("요인 분석을 진행하기에 데이터가 충분하지 않습니다. 필터를 완화해 보세요.")
     else:
-        tab_corr, tab_reg = st.tabs(["상관 분석", "회귀 분석"])
+        tab_dist, tab_loglog, tab_subway, tab_hedonic = st.tabs([
+            "① 월세 분포 & Re-expression",
+            "② 보증금–월세 관계 (log-log)",
+            "③ 역세권 vs 비역세권",
+            "④ Hedonic 가격 모형"
+        ])
 
-        # -------------------------
-        # TAB 1: 상관 분석
-        # -------------------------
-        with tab_corr:
-            st.subheader("① 주요 수치 변수 간 상관관계")
+        # ① 월세 분포 & Re-expression
+        with tab_dist:
+            st.subheader(f"① 월세 분포 분석 & Re-expression (log 변환) – {scope_loc_label}")
 
-            corr_cols = [
-                "전용면적(㎡)",
-                "보증금(만원)",
-                "월세금(만원)",
-                "전용면적당 월세(만원/㎡)",
-                "층",
-                "건축년도",
-            ]
+            rent = base[base["월세금(만원)"] > 0]["월세금(만원)"].dropna()
 
-            use_cols = [c for c in corr_cols if c in base.columns]
-            data_corr = base[use_cols].dropna()
-
-            if data_corr.shape[0] < 10:
-                st.info("상관 분석을 위한 유효한 데이터가 부족합니다.")
+            if len(rent) < 10:
+                st.info("월세 거래가 충분하지 않아 분포 분석이 어렵습니다.")
             else:
-                corr = data_corr.corr()
+                log_rent = np.log1p(rent)
 
-                st.write("##### 상관계수 표")
-                st.dataframe(corr.style.background_gradient(cmap="RdBu_r"))
+                c1, c2 = st.columns(2)
+                with c1:
+                    fig1, ax1 = plt.subplots()
+                    ax1.hist(rent, bins=30)
+                    ax1.set_title(f"Raw Monthly Rent Histogram ({scope_loc_label})")
+                    ax1.set_xlabel("Monthly Rent (10k KRW)")
+                    ax1.set_ylabel("Count")
+                    st.pyplot(fig1)
 
-                st.write("##### 상관계수 히트맵")
+                with c2:
+                    fig2, ax2 = plt.subplots()
+                    ax2.hist(log_rent, bins=30)
+                    ax2.set_title(f"log(1+Rent) Histogram ({scope_loc_label})")
+                    ax2.set_xlabel("log(1 + Monthly Rent)")
+                    ax2.set_ylabel("Count")
+                    st.pyplot(fig2)
 
-                corr_reset = corr.reset_index()
-                first_col = corr_reset.columns[0]
+                # Q-Q plots
+                c3, c4 = st.columns(2)
+                with c3:
+                    fig3, ax3 = plt.subplots()
+                    (th_q1, ord1), (s1, i1, r1) = stats.probplot(rent, dist="norm", fit=True)
+                    ax3.scatter(th_q1, ord1, alpha=0.7, label="Observed rents")
+                    ax3.plot(th_q1, s1 * th_q1 + i1, color="red", linewidth=2,
+                             label="Reference line (normal fit)")
+                    ax3.set_title(f"Q-Q Plot (Raw Rent) – {scope_loc_label}")
+                    ax3.set_xlabel("Theoretical quantiles")
+                    ax3.set_ylabel("Observed")
+                    ax3.legend(loc="best")
+                    st.pyplot(fig3)
 
-                corr_melt = (
-                    corr_reset
-                    .rename(columns={first_col: "변수1"})
-                    .melt("변수1", var_name="변수2", value_name="상관계수")
-                )
+                with c4:
+                    fig4, ax4 = plt.subplots()
+                    (th_q2, ord2), (s2, i2, r2) = stats.probplot(log_rent, dist="norm", fit=True)
+                    ax4.scatter(th_q2, ord2, alpha=0.7, label="Observed log-rents")
+                    ax4.plot(th_q2, s2 * th_q2 + i2, color="red", linewidth=2,
+                             label="Reference line (normal fit)")
+                    ax4.set_title(f"Q-Q Plot (log(1+Rent)) – {scope_loc_label}")
+                    ax4.set_xlabel("Theoretical quantiles")
+                    ax4.set_ylabel("Observed")
+                    ax4.legend(loc="best")
+                    st.pyplot(fig4)
 
-                heatmap = (
-                    alt.Chart(corr_melt)
-                    .mark_rect()
+                st.write("#### Skewness 비교 (대칭성)")
+                skew_df = pd.DataFrame({
+                    "변수": ["Raw 월세", "log(1+월세)"],
+                    "Skewness": [rent.skew(), log_rent.skew()]
+                })
+                st.dataframe(skew_df)
+
+                st.info("""
+- Raw 월세는 우측 꼬리가 긴(right-skewed) 분포인 경우가 많음  
+- log 변환 후 Skewness가 0에 가까워지면 **대칭성(Symmetrization)**이 개선된 것  
+- 이는 회귀 분석에서 에러항이 정규라는 가정을 더 잘 만족하도록 도와줍니다.
+""")
+
+        # ② 보증금–월세 관계 (log-log)
+        with tab_loglog:
+            st.subheader(f"② 보증금–월세 관계의 단순화 (log-log Re-expression) – {scope_loc_label}")
+
+            rent_data = base[(base["월세금(만원)"] > 0) & (base["보증금(만원)"] > 0)].copy()
+
+            if len(rent_data) < 10:
+                st.info("보증금과 월세가 모두 있는 월세 거래가 충분하지 않습니다.")
+            else:
+                rent_data["log_보증금"] = np.log1p(rent_data["보증금(만원)"])
+                rent_data["log_월세"] = np.log1p(rent_data["월세금(만원)"])
+
+                st.write("#### Raw scatter: 보증금 vs 월세")
+                chart_raw = (
+                    alt.Chart(rent_data)
+                    .mark_circle(size=40, opacity=0.5)
                     .encode(
-                        x=alt.X("변수1:N", title=""),
-                        y=alt.Y("변수2:N", title=""),
-                        color=alt.Color("상관계수:Q", scale=alt.Scale(scheme="redblue")),
-                        tooltip=["변수1", "변수2", "상관계수"]
+                        x=alt.X("보증금(만원):Q", title="보증금 (만원)"),
+                        y=alt.Y("월세금(만원):Q", title="월세 (만원)"),
+                        tooltip=["구", "동", "단지명", "보증금(만원)", "월세금(만원)"]
                     )
+                    .properties(title=f"보증금 vs 월세 (Raw, {scope_loc_label})")
                 )
+                st.altair_chart(chart_raw, use_container_width=True)
 
-                text = (
-                    alt.Chart(corr_melt)
-                    .mark_text(baseline="middle")
+                st.write("#### log-log scatter: log(보증금) vs log(월세)")
+                chart_log = (
+                    alt.Chart(rent_data)
+                    .mark_circle(size=40, opacity=0.5)
                     .encode(
-                        x="변수1:N",
-                        y="변수2:N",
-                        text=alt.Text("상관계수:Q", format=".2f")
+                        x=alt.X("log_보증금:Q", title="log(1+보증금)"),
+                        y=alt.Y("log_월세:Q", title="log(1+월세)"),
+                        tooltip=["구", "동", "단지명", "보증금(만원)", "월세금(만원)"]
                     )
+                    .properties(title=f"log(보증금) vs log(월세) (log-log, {scope_loc_label})")
                 )
+                st.altair_chart(chart_log, use_container_width=True)
 
-                st.altair_chart(heatmap + text, use_container_width=True)
+                # 선형 회귀 (log-log)
+                X_ll = rent_data[["log_보증금"]]
+                y_ll = rent_data["log_월세"]
+                model_ll = LinearRegression()
+                model_ll.fit(X_ll, y_ll)
 
-        # -------------------------
-        # TAB 2: 회귀 분석
-        # -------------------------
-        with tab_reg:
-            st.subheader("② 다중 회귀 분석")
+                st.write("#### log-log 선형 회귀 결과")
+                st.write(f"log(월세) = {model_ll.intercept_:.3f} + {model_ll.coef_[0]:.3f} × log(보증금)")
+                st.caption("→ Re-expression 후 관계가 더 직선에 가깝다면, 수업에서 말한 '관계의 선형화'가 잘 적용된 것.")
 
-            target = st.radio(
-                "종속 변수(설명하고 싶은 임대료)를 선택하세요.",
-                ["월세금(만원)", "보증금(만원)"],
-                index=0
-            )
+        # ③ 역세권 vs 비역세권
+        with tab_subway:
+            st.subheader(f"③ 역세권 vs 비역세권 월세 분포 비교 – {scope_loc_label}")
 
-            data_reg = base.copy()
-
-            # 종속 변수에 맞게 거래 필터링
-            if target == "월세금(만원)":
-                data_reg = data_reg[data_reg["월세금(만원)"] > 0]
+            if "역세권" not in base.columns:
+                st.warning("현재 데이터에는 '역세권' 더미 변수(0/1)가 없습니다. 전처리에서 '역세권' 컬럼을 추가하면 이 탭이 자동으로 작동합니다.")
             else:
-                data_reg = data_reg[data_reg["보증금(만원)"] > 0]
-
-            # 사용할 설명 변수들
-            num_features = []
-            for col in ["전용면적(㎡)", "층", "건축년도", "전용면적당 월세(만원/㎡)"]:
-                if col in data_reg.columns:
-                    num_features.append(col)
-
-            cat_features = []
-            for col in ["구", "계약구분", "전월세구분"]:
-                if col in data_reg.columns:
-                    cat_features.append(col)
-
-            if target not in data_reg.columns or len(num_features) == 0:
-                st.info("회귀분석에 필요한 컬럼이 부족합니다.")
-            else:
-                # X, y 구성
-                X = data_reg[num_features + cat_features].copy()
-                y = data_reg[target].copy()
-
-                # 원-핫 인코딩
-                if cat_features:
-                    X = pd.get_dummies(X, columns=cat_features, drop_first=True)
-
-                # 결측치 제거
-                reg_df = pd.concat([X, y], axis=1).dropna()
-                X = reg_df[X.columns]
-                y = reg_df[target]
-
-                if X.shape[0] < 50 or X.shape[1] == 0:
-                    st.info("회귀 분석을 수행하기에 유효한 데이터(표본 수)가 부족합니다.")
+                rent = base[base["월세금(만원)"] > 0].copy()
+                if len(rent) < 10:
+                    st.info("월세 거래가 충분하지 않아 그룹 비교가 어렵습니다.")
                 else:
-                    model = LinearRegression()
-                    model.fit(X, y)
+                    w1 = rent[rent["역세권"] == 1]["월세금(만원)"].dropna()
+                    w0 = rent[rent["역세권"] == 0]["월세금(만원)"].dropna()
 
-                    r2 = model.score(X, y)
+                    if len(w1) < 5 or len(w0) < 5:
+                        st.info("역세권/비역세권 각각의 표본 수가 너무 적습니다.")
+                    else:
+                        summary = pd.DataFrame({
+                            "역세권": [w1.median(), w1.quantile(.25), w1.quantile(.75),
+                                     w1.quantile(.75) - w1.quantile(.25), w1.skew()],
+                            "비역세권": [w0.median(), w0.quantile(.25), w0.quantile(.75),
+                                     w0.quantile(.75) - w0.quantile(.25), w0.skew()]
+                        }, index=["median", "HL", "HU", "spread(HU-HL)", "skew(H)"])
 
-                    st.write("##### 모델 요약")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("표본 수", f"{X.shape[0]:,} 건")
-                    with col2:
-                        st.metric("결정계수 (R²)", f"{r2:.3f}")
+                        st.write("#### Numerical Summary (Chapter 4 개념 적용)")
+                        st.dataframe(summary)
 
-                    coef_series = pd.Series(model.coef_, index=X.columns)
-                    coef_df = (
-                        pd.DataFrame({
-                            "변수": coef_series.index,
-                            "회귀계수": coef_series.values,
-                            "절대값": coef_series.abs().values
+                        # Boxplot
+                        melt_df = rent[["월세금(만원)", "역세권"]].copy()
+                        melt_df["역세권"] = melt_df["역세권"].map({1: "역세권", 0: "비역세권"})
+
+                        fig, ax = plt.subplots()
+                        melt_df.boxplot(by="역세권", column="월세금(만원)", ax=ax)
+                        ax.set_title(f"역세권 vs 비역세권 월세 Boxplot ({scope_loc_label})")
+                        ax.set_ylabel("월세 (만원)")
+                        plt.suptitle("")
+                        st.pyplot(fig)
+
+                        st.info("""
+- median: 중심 위치 비교 → 역세권 프리미엄 크기  
+- spread(HU-HL): 변동성 비교 → 역세권이 매물 스펙이 다양하면 더 클 수 있음  
+- skew(H): 비대칭성 → 비정상적으로 높은 월세 매물의 존재 여부를 시사  
+""")
+
+        # ④ Hedonic 가격 모형 (다중회귀) + 시각화
+        with tab_hedonic:
+            st.subheader(f"④ Hedonic 가격 결정 모형 (다중회귀) – {scope_loc_label}")
+
+            rent = base[base["월세금(만원)"] > 0].copy()
+
+            if len(rent) < 50:
+                st.info("Hedonic 모형을 추정하기에 월세 거래 표본이 충분하지 않습니다.")
+            else:
+                # 사용할 기본 설명 변수들
+                feature_cols = []
+                for col in ["보증금(만원)", "전용면적(㎡)", "건축년도", "층"]:
+                    if col in rent.columns:
+                        feature_cols.append(col)
+
+                # 역세권 더미가 있으면 같이 사용
+                if "역세권" in rent.columns:
+                    feature_cols.append("역세권")
+
+                if not feature_cols:
+                    st.warning("회귀 분석에 사용할 수 있는 수치형 설명 변수가 없습니다.")
+                else:
+                    reg_df = rent[feature_cols + ["월세금(만원)"]].dropna().copy()
+                    X = reg_df[feature_cols]
+                    y = reg_df["월세금(만원)"]
+
+                    if len(reg_df) < 50:
+                        st.info("결측치 제거 후 표본 수가 부족합니다.")
+                    else:
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        r2 = model.score(X, y)
+
+                        coef_df = pd.DataFrame({
+                            "변수": feature_cols,
+                            "계수(β)": model.coef_
                         })
-                        .sort_values("절대값", ascending=False)
-                    )[["변수", "회귀계수"]]
+                        coef_df["|β|"] = coef_df["계수(β)"].abs()
+                        coef_df = coef_df.sort_values("|β|", ascending=False)
 
-                    st.write("##### 변수별 영향력 (계수 크기 기준 정렬)")
-                    st.dataframe(coef_df)
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("표본 수", f"{len(reg_df):,} 건")
+                        with col2:
+                            st.metric("결정계수 (R²)", f"{r2:.3f}")
 
-                    st.caption("""
-- 회귀계수가 양수이면, 해당 변수가 증가할수록 임대료가 증가하는 방향입니다.  
-- 음수이면, 해당 변수가 증가할수록 임대료가 감소하는 방향입니다.  
-- R² 값은 이 모델이 임대료 변동을 얼마나 설명하는지를 나타냅니다.
+                        st.write("#### 회귀 계수 (Hedonic 모형 결과)")
+                        st.dataframe(coef_df[["변수", "계수(β)"]])
+
+                        # 🔹 회귀 계수 시각화 (Bar chart)
+                        st.write("#### 회귀 계수 시각화 (변수별 영향력 크기)")
+
+                        coef_chart = (
+                            alt.Chart(coef_df)
+                            .mark_bar()
+                            .encode(
+                                x=alt.X("계수(β):Q", title="회귀 계수"),
+                                y=alt.Y("변수:N", sort='-x', title="변수"),
+                                tooltip=["변수", "계수(β)"]
+                            )
+                            .properties(title=f"Hedonic 회귀 계수 Bar Chart ({scope_loc_label})")
+                        )
+                        st.altair_chart(coef_chart, use_container_width=True)
+
+                        # 🔹 실제값 vs 예측값 시각화
+                        st.write("#### 실제 월세 vs 예측 월세 (모형 적합도)")
+
+                        y_pred = model.predict(X)
+                        fit_df = pd.DataFrame({
+                            "실제값": y.values,
+                            "예측값": y_pred
+                        })
+
+                        scatter_fit = (
+                            alt.Chart(fit_df)
+                            .mark_point(size=40, opacity=0.6)
+                            .encode(
+                                x=alt.X("실제값:Q", title="실제 월세 (만원)"),
+                                y=alt.Y("예측값:Q", title="예측 월세 (만원)"),
+                                tooltip=["실제값", "예측값"]
+                            )
+                        )
+
+                        min_val = float(min(fit_df["실제값"].min(), fit_df["예측값"].min()))
+                        max_val = float(max(fit_df["실제값"].max(), fit_df["예측값"].max()))
+                        line_df = pd.DataFrame({"x": [min_val, max_val], "y": [min_val, max_val]})
+
+                        line = (
+                            alt.Chart(line_df)
+                            .mark_line()
+                            .encode(
+                                x="x:Q",
+                                y="y:Q"
+                            )
+                        )
+
+                        st.altair_chart(
+                            (scatter_fit + line).properties(
+                                title=f"실제값 vs 예측값 (y=x 기준선 포함, {scope_loc_label})"
+                            ),
+                            use_container_width=True
+                        )
+
+                        st.caption("""
+- 각 β는 해당 특성이 월세에 미치는 **한계가격(implicit price)**  
+  - 예: 역세권 β = 5 → 역세권이면 월세가 평균 5만원 더 비쌉니다.  
+- R²는 이 모형이 월세 변동을 얼마나 설명하는지 보여줍니다.  
+- 실제값 vs 예측값 산점도에서 점들이 y=x 선에 가까이 붙어 있으면 모형 적합도가 좋다는 뜻입니다.  
+- 수업에서 배운 Hedonic 모형:  
+  **월세 = f(전용면적, 건축년도, 역세권 여부, 층수, 보증금, …)** 를 실제 데이터에 적용한 결과입니다.
 """)
 
 
 # =========================
-# 8. 페이지 4: 클러스터링 분석 (구 + 동)
+# 8. 페이지 5: 클러스터링 분석 (구 + 동)
 # =========================
 elif page == "클러스터링 분석":
     title_suffix = "" if selected_dong == "전체" else f" ({selected_dong})"
-    st.header(f"🔍 클러스터링 분석 – {selected_gu}{title_suffix}")
+    st.header(f"🔍 클러스터링 분석 – {loc_label}")
 
     base = apply_common_filters(df, gu=selected_gu, dong=selected_dong)
     rent_base = base[base["월세금(만원)"] > 0]  # 월세 거래만
@@ -834,11 +1086,9 @@ elif page == "클러스터링 분석":
     else:
         tab_k1, tab_k2 = st.tabs(["전체 월세 거래 클러스터링", "이상 거래 중심 클러스터링"])
 
-        # -------------------------
         # TAB K1: 전체 월세 거래
-        # -------------------------
         with tab_k1:
-            st.subheader("① 전체 월세 거래 클러스터링")
+            st.subheader(f"① 전체 월세 거래 클러스터링 ({loc_label} 기준)")
 
             use_cols = [
                 "전용면적(㎡)", "보증금(만원)", "월세금(만원)",
@@ -859,10 +1109,8 @@ elif page == "클러스터링 분석":
                 model = KMeans(n_clusters=k, random_state=42, n_init="auto")
                 labels = model.fit_predict(scaled)
 
-                data_k["cluster"] = labels
-                data_k["cluster"] = data_k["cluster"].astype(int)
+                data_k["cluster"] = labels.astype(int)
 
-                # 원본 인덱스로부터 단지명 등 붙이기
                 result = data_k.merge(
                     rent_base[["구", "동", "단지명", "계약년월", "전월세구분"]],
                     left_index=True,
@@ -891,25 +1139,23 @@ elif page == "클러스터링 분석":
                         alt.Chart(chart_df)
                         .mark_circle(size=60, opacity=0.6)
                         .encode(
-                            x="전용면적(㎡):Q",
-                            y="월세금(만원):Q",
+                            x=alt.X("전용면적(㎡):Q", title="전용면적(㎡)"),
+                            y=alt.Y("월세금(만원):Q", title="월세(만원)"),
                             color="cluster:N",
                             tooltip=["cluster", "전용면적(㎡)", "월세금(만원)", "보증금(만원)"]
                         )
+                        .properties(title=f"전용면적 vs 월세 (클러스터 색, {loc_label} 기준)")
                     )
                     st.write("#### 🎨 전용면적 vs 월세 (클러스터 색)")
                     st.altair_chart(scatter, use_container_width=True)
 
-        # -------------------------
         # TAB K2: 이상 거래 중심
-        # -------------------------
         with tab_k2:
-            st.subheader("② 이상 거래 중심 클러스터링")
+            st.subheader(f"② 이상 거래 중심 클러스터링 ({loc_label} 기준)")
 
             df_anom = rent_base.copy()
 
             # 간단 기준으로 이상 플래그 (상위 10%씩)
-            # 1) 보증금 대비 월세 비율
             df_anom["비율"] = np.where(
                 df_anom["보증금(만원)"] > 0,
                 df_anom["월세금(만원)"] / df_anom["보증금(만원)"],
@@ -918,7 +1164,6 @@ elif page == "클러스터링 분석":
             thr1 = df_anom["비율"].quantile(0.90)
             df_anom["이상_비율"] = df_anom["비율"] >= thr1
 
-            # 2) 월세 상위 10%
             thr3 = df_anom["월세금(만원)"].quantile(0.90)
             df_anom["이상_고가"] = df_anom["월세금(만원)"] >= thr3
 
@@ -949,8 +1194,7 @@ elif page == "클러스터링 분석":
 
                     model2 = KMeans(n_clusters=k2, random_state=42, n_init="auto")
                     labels2 = model2.fit_predict(scaled2)
-                    data_k2["cluster"] = labels2
-                    data_k2["cluster"] = data_k2["cluster"].astype(int)
+                    data_k2["cluster"] = labels2.astype(int)
 
                     result2 = data_k2.merge(
                         anom_only[["구", "동", "단지명", "계약년월", "전월세구분"]],
@@ -980,11 +1224,12 @@ elif page == "클러스터링 분석":
                             alt.Chart(chart2)
                             .mark_circle(size=60, opacity=0.6)
                             .encode(
-                                x="전용면적(㎡):Q",
-                                y="월세금(만원):Q",
+                                x=alt.X("전용면적(㎡):Q", title="전용면적(㎡)"),
+                                y=alt.Y("월세금(만원):Q", title="월세(만원)"),
                                 color="cluster:N",
                                 tooltip=["cluster", "전용면적(㎡)", "월세금(만원)", "보증금(만원)"]
                             )
+                            .properties(title=f"전용면적 vs 월세 (이상 거래 클러스터, {loc_label} 기준)")
                         )
                         st.write("#### 🎨 전용면적 vs 월세 (이상 거래 클러스터)")
                         st.altair_chart(scatter2, use_container_width=True)
