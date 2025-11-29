@@ -7,5 +7,9 @@ scipy
 folium
 streamlit-folium
 scikit-learn
+crewai
+crewai-tools
+plotly
+python-dotenv
 
 
