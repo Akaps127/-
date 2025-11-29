@@ -11,5 +11,6 @@ crewai
 crewai-tools
 plotly
 python-dotenv
+streamlit-echarts
 
 
