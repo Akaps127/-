@@ -9,8 +9,7 @@ streamlit-folium
 scikit-learn
 crewai
 crewai-tools
-plotly
+openai
 python-dotenv
+plotly
 streamlit-echarts
-
-
