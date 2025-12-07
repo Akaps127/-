@@ -20,7 +20,6 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-assert OPENAI_API_KEY is not None, "🚨 OPENAI_API_KEY가 설정되지 않았습니다!"
 # 가상환경 진입: W03_env\Scripts\activate.bat
 
 # =========================
@@ -1887,3 +1886,4 @@ elif page == "AI 정성 분석":
             st.markdown("#### 결과 리포트")
             st.markdown(report)
             st.session_state["last_rarity_report"] = report
+
