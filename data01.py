@@ -19,7 +19,8 @@ from crewai_reports import (
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
-
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+assert OPENAI_API_KEY is not None, "🚨 OPENAI_API_KEY가 설정되지 않았습니다!"
 # 가상환경 진입: W03_env\Scripts\activate.bat
 
 # =========================
