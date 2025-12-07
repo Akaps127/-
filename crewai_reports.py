@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-assert OPENAI_API_KEY, "OPENAI_API_KEY missing"
 from crewai import Agent, Task, Crew, Process, LLM
 
 
@@ -318,3 +317,4 @@ __all__ = [
     "run_comparison_report",
     "run_market_rarity_report",
 ]
+
