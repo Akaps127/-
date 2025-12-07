@@ -1,6 +1,11 @@
 import os
 from typing import Optional
+from dotenv import load_dotenv
 
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+assert OPENAI_API_KEY, "OPENAI_API_KEY missing"
 from crewai import Agent, Task, Crew, Process, LLM
 
 
@@ -40,10 +45,23 @@ def _get_llm() -> LLM:
         except Exception:
             model_name = "gpt-4o-mini"
 
-    return LLM(
-        model=model_name,
-        api_key=api_key,
-    )
+    # litellm이 없어서 깨지는 경우를 조금 더 친절하게 에러로 보여주기
+    try:
+        llm = LLM(
+            model=model_name,
+            api_key=api_key,
+        )
+    except ImportError as e:
+        raise RuntimeError(
+            "CrewAI LLM 생성 중 ImportError가 발생했습니다.\n"
+            "대부분 requirements.txt에 'litellm' 또는 'openai'가 없을 때 생깁니다.\n"
+            "requirements.txt 에 아래 두 줄이 들어있는지 확인하고 다시 배포해 주세요.\n\n"
+            "    openai\n"
+            "    litellm\n\n"
+            f"원래 ImportError 메시지: {e}"
+        ) from e
+
+    return llm
 
 
 # ==============================
@@ -61,12 +79,16 @@ def _run_crew(prompt: str, role: str, goal: str, backstory: str) -> str:
         backstory=backstory,
         verbose=False,
         allow_delegation=False,
-        llm=llm,
+        llm=llm,  # 👈 명시적으로 LLM 지정
     )
 
     task = Task(
         description=prompt,
         agent=analyst,
+        expected_output=(
+            "한국어로 작성된 구조화된 리포트. "
+            "요약, 세부 분석, 결론 섹션을 포함하고, 마크다운 텍스트 형식으로 출력한다."
+        ),
     )
 
     crew = Crew(
