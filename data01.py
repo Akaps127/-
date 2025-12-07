@@ -7,7 +7,8 @@ from scipy import stats
 import io
 import matplotlib.font_manager as fm
 import os
-
+from dotenv import load_dotenv
+load_dotenv() 
 from crewai import Agent, Task, Crew, Process 
 from crewai_reports import (
     run_recommendation_report,
