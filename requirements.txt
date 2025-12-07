@@ -13,3 +13,4 @@ openai
 python-dotenv
 plotly
 streamlit-echarts
+litellm
