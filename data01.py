@@ -6,9 +6,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import io
 import matplotlib.font_manager as fm
-import os
-from dotenv import load_dotenv
-load_dotenv() 
+import os 
 from crewai import Agent, Task, Crew, Process 
 from crewai_reports import (
     run_recommendation_report,
@@ -19,7 +17,6 @@ from crewai_reports import (
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # 가상환경 진입: W03_env\Scripts\activate.bat
 
 # =========================
@@ -1886,4 +1883,5 @@ elif page == "AI 정성 분석":
             st.markdown("#### 결과 리포트")
             st.markdown(report)
             st.session_state["last_rarity_report"] = report
+
 
