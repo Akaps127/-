@@ -12,9 +12,5 @@ crewai-tools
 plotly
 python-dotenv
 streamlit-echarts
-
-# LLM 관련 (이게 없어서 지금 죽는 거임)
-openai>=1.0.0
-# 선택사항이지만 써보고 싶으면 같이 추가
-# litellm>=1.51.0
-
+openai
+litellm
