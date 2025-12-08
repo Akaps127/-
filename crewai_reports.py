@@ -1,10 +1,5 @@
 import os
 from typing import Optional
-from dotenv import load_dotenv
-
-load_dotenv()
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 from crewai import Agent, Task, Crew, Process, LLM
 
 
