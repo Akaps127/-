@@ -4,6 +4,53 @@ from crewai import Agent, Task, Crew, Process, LLM
 
 
 # ==============================
+# OpenAI 관련 환경변수 정리 헬퍼
+# ==============================
+def _sanitize_openai_env() -> None:
+    """
+    OpenAI / Proxy 관련 환경변수 중에서
+    HTTP 헤더에 들어갈 수 있는 값에 한글/비-ASCII 문자가 있으면 제거한다.
+    (httpx가 헤더를 ASCII로만 인코딩하려고 해서 UnicodeEncodeError가 나는 것을 방지)
+    """
+    problem_vars = []
+
+    for name, value in os.environ.items():
+        if not value:
+            continue
+
+        # OpenAI 관련 또는 프록시 관련 환경변수만 검사
+        if name.startswith("OPENAI") or name.endswith("_PROXY") or name in {
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+        }:
+            try:
+                # 헤더는 ASCII만 허용되므로 ASCII 인코딩이 안 되면 문제 있음
+                value.encode("ascii")
+            except UnicodeEncodeError:
+                problem_vars.append(name)
+
+    # 문제 있는 환경변수는 제거
+    for name in problem_vars:
+        os.environ.pop(name, None)
+
+    # Streamlit 환경이면 경고 한 줄 띄워주기 (어떤 변수 제거됐는지)
+    if problem_vars:
+        try:
+            import streamlit as st
+
+            st.warning(
+                "다음 환경변수에 한글/특수문자가 포함되어 제거했습니다. "
+                "이 값들이 OpenAI HTTP 헤더에 들어가면서 UnicodeEncodeError를 유발했을 수 있습니다:\n"
+                f"{', '.join(problem_vars)}"
+            )
+        except Exception:
+            # streamlit이 없는 환경이면 조용히 무시
+            pass
+
+
+# ==============================
 # LLM 헬퍼
 # ==============================
 def _get_llm() -> LLM:
@@ -13,12 +60,16 @@ def _get_llm() -> LLM:
     1) os.environ["OPENAI_API_KEY"]
     2) st.secrets["OPENAI_API_KEY"]
     """
+    # ⚠️ 먼저 환경변수 정리 (비-ASCII 값 제거)
+    _sanitize_openai_env()
+
     api_key = os.getenv("OPENAI_API_KEY")
 
     # Streamlit Cloud에서 .env를 안 쓰는 경우 대비: secrets도 같이 확인
     if not api_key:
         try:
             import streamlit as st  # streamlit 환경에서만 불러짐
+
             api_key = st.secrets.get("OPENAI_API_KEY")
         except Exception:
             api_key = None
@@ -27,7 +78,7 @@ def _get_llm() -> LLM:
         raise RuntimeError(
             "OPENAI_API_KEY가 설정되어 있지 않습니다.\n"
             "• 로컬: 프로젝트 루트의 .env 파일에 OPENAI_API_KEY=... 를 넣고, data01.py에서 load_dotenv()를 호출하세요.\n"
-            "• Streamlit Cloud: 앱의 Secrets 설정에 OPENAI_API_KEY를 추가하세요."
+            "• Streamlit: .streamlit/secrets.toml 파일에 OPENAI_API_KEY=\"...\" 를 추가하세요."
         )
 
     model_name = os.getenv("OPENAI_MODEL_NAME")
@@ -35,9 +86,16 @@ def _get_llm() -> LLM:
     if not model_name:
         try:
             import streamlit as st
+
             model_name = st.secrets.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
         except Exception:
             model_name = "gpt-4o-mini"
+
+    # 혹시 모델명에 비-ASCII 문자가 들어있으면 안전하게 기본값으로 교체
+    try:
+        model_name.encode("ascii")
+    except UnicodeEncodeError:
+        model_name = "gpt-4o-mini"
 
     # litellm이 없어서 깨지는 경우를 조금 더 친절하게 에러로 보여주기
     try:
@@ -73,6 +131,7 @@ def _run_crew(prompt: str, role: str, goal: str, backstory: str) -> str:
         # Streamlit 환경이면 화면에 바로 에러 표시
         try:
             import streamlit as st
+
             st.error(f"❌ CrewAI LLM 초기화 실패\n\n{e}")
         except Exception:
             # streamlit이 없는 환경이면 조용히 패스
