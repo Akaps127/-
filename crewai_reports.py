@@ -70,8 +70,22 @@ def _run_crew(prompt: str, role: str, goal: str, backstory: str) -> str:
     """
     단일 Agent + 단일 Task로 간단히 리포트를 생성하는 공통 함수.
     """
-    llm = _get_llm()
+    # 1) LLM 생성 단계에서 나는 RuntimeError를 잡아서
+    #    Streamlit 화면에 에러를 보여주고, 문자열을 리턴하게 처리
+    try:
+        llm = _get_llm()
+    except RuntimeError as e:
+        # Streamlit 환경이면 화면에 바로 에러 표시
+        try:
+            import streamlit as st
+            st.error(f"❌ CrewAI LLM 초기화 실패\n\n{e}")
+        except Exception:
+            # streamlit이 없는 환경이면 조용히 패스
+            pass
+        # 그리고 리포트 자리에는 안내 문구만 넣어 줌
+        return f"⚠️ AI 리포트를 생성할 수 없습니다:\n{e}"
 
+    # 2) LLM이 정상적으로 만들어진 경우에만 Agent / Task / Crew 실행
     analyst = Agent(
         role=role,
         goal=goal,
@@ -317,4 +331,3 @@ __all__ = [
     "run_comparison_report",
     "run_market_rarity_report",
 ]
-
