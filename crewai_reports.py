@@ -1,7 +1,12 @@
 import os
+from textwrap import dedent
+
 from typing import Optional
 from crewai import Agent, Task, Crew, Process, LLM
+from dotenv import load_dotenv
 
+# .env도 로컬에서 쓸 수 있도록 로드
+load_dotenv()
 
 # ==============================
 # OpenAI 관련 환경변수 정리 헬퍼
@@ -55,64 +60,35 @@ def _sanitize_openai_env() -> None:
 # ==============================
 def _get_llm() -> LLM:
     """
-    환경변수 또는 Streamlit secrets에서 OpenAI 설정을 읽어서 LLM 인스턴스를 생성.
-    우선순위:
-    1) os.environ["OPENAI_API_KEY"]
-    2) st.secrets["OPENAI_API_KEY"]
-    """
-    # ⚠️ 먼저 환경변수 정리 (비-ASCII 값 제거)
-    _sanitize_openai_env()
+    OPENAI_API_KEY를 다음 우선순위로 읽어서 CrewAI LLM 인스턴스를 생성한다.
 
+    1) os.environ["OPENAI_API_KEY"]  (.env 포함)
+    2) st.secrets["OPENAI_API_KEY"]  (Streamlit Cloud)
+    """
+    # 1) 환경변수 / .env
     api_key = os.getenv("OPENAI_API_KEY")
 
-    # Streamlit Cloud에서 .env를 안 쓰는 경우 대비: secrets도 같이 확인
+    # 2) 안 나오면 st.secrets에서 시도 (Streamlit 환경일 때)
     if not api_key:
         try:
-            import streamlit as st  # streamlit 환경에서만 불러짐
-
+            import streamlit as st  # 스트림릿 환경에서만 import
             api_key = st.secrets.get("OPENAI_API_KEY")
         except Exception:
             api_key = None
 
+    # 3) 둘 다 실패하면 에러
     if not api_key:
         raise RuntimeError(
             "OPENAI_API_KEY가 설정되어 있지 않습니다.\n"
             "• 로컬: 프로젝트 루트의 .env 파일에 OPENAI_API_KEY=... 를 넣고, data01.py에서 load_dotenv()를 호출하세요.\n"
-            "• Streamlit: .streamlit/secrets.toml 파일에 OPENAI_API_KEY=\"...\" 를 추가하세요."
+            "• Streamlit: Secrets에 OPENAI_API_KEY=\"...\" 를 추가하세요.\n"
         )
 
-    model_name = os.getenv("OPENAI_MODEL_NAME")
-
-    if not model_name:
-        try:
-            import streamlit as st
-
-            model_name = st.secrets.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
-        except Exception:
-            model_name = "gpt-4o-mini"
-
-    # 혹시 모델명에 비-ASCII 문자가 들어있으면 안전하게 기본값으로 교체
-    try:
-        model_name.encode("ascii")
-    except UnicodeEncodeError:
-        model_name = "gpt-4o-mini"
-
-    # litellm이 없어서 깨지는 경우를 조금 더 친절하게 에러로 보여주기
-    try:
-        llm = LLM(
-            model=model_name,
-            api_key=api_key,
-        )
-    except ImportError as e:
-        raise RuntimeError(
-            "CrewAI LLM 생성 중 ImportError가 발생했습니다.\n"
-            "대부분 requirements.txt에 'litellm' 또는 'openai'가 없을 때 생깁니다.\n"
-            "requirements.txt 에 아래 두 줄이 들어있는지 확인하고 다시 배포해 주세요.\n\n"
-            "    openai\n"
-            "    litellm\n\n"
-            f"원래 ImportError 메시지: {e}"
-        ) from e
-
+    # 여기까지 왔으면 api_key는 무조건 존재
+    llm = LLM(
+        model="gpt-4.1-mini",   # 필요시 원하는 모델명으로 변경
+        api_key=api_key,
+    )
     return llm
 
 
