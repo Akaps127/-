@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 import io
 import matplotlib.font_manager as fm
-import os 
+import os
 from crewai import Agent, Task, Crew, Process 
 from crewai_reports import (
     run_recommendation_report,
@@ -17,6 +17,7 @@ from crewai_reports import (
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+
 # 가상환경 진입: W03_env\Scripts\activate.bat
 
 # =========================
@@ -47,6 +48,9 @@ st.set_page_config(
     page_title="서울 전월세 실거래 분석 (오피스텔/아파트/연립다세대)",
     layout="wide"
 )
+
+st.sidebar.write("DEBUG - has OPENAI_API_KEY in secrets:", "OPENAI_API_KEY" in st.secrets)
+
 
 # ========= SessionState 기본값 =========
 if "initialized" not in st.session_state:
@@ -1883,5 +1887,3 @@ elif page == "AI 정성 분석":
             st.markdown("#### 결과 리포트")
             st.markdown(report)
             st.session_state["last_rarity_report"] = report
-
-
