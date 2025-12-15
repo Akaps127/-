@@ -377,10 +377,40 @@ def run_market_rarity_report(
 
     return _run_crew(prompt, role, goal, backstory)
 
+def run_listing_judgement_report(
+    listing_text: str,
+    extra_instruction: Optional[str] = None,
+) -> str:
+    role = "부동산 매물 평가 전문가"
+    goal = "실제 본 매물이 시장에서 좋은 선택인지 판단하고, 근거를 설명한다."
+    backstory = (
+        "너는 실거래 데이터와 가격 모델을 기반으로, "
+        "개별 매물이 합리적인 선택인지 조언하는 분석가다."
+    )
+
+    prompt_parts = [
+        "다음은 실제 본 매물의 시장 비교 결과이다.",
+        "",
+        listing_text,
+        "",
+        "위 정보를 바탕으로 아래를 포함해 평가 리포트를 작성해줘.",
+        "- 이 매물이 왜 좋은지/왜 애매한지/왜 피해야 하는지",
+        "- 숫자 근거를 말로 풀어서 설명",
+        "- 계약 전에 반드시 확인해야 할 체크포인트",
+        "- 마지막에 한 줄 결론",
+    ]
+
+    if extra_instruction:
+        prompt_parts.extend(["", "추가 지시사항:", extra_instruction])
+
+    prompt = "\n".join(prompt_parts)
+    return _run_crew(prompt, role, goal, backstory)
+
 
 __all__ = [
     "run_recommendation_report",
     "run_condition_coach_report",
     "run_comparison_report",
     "run_market_rarity_report",
+    "run_listing_judgement_report",
 ]
