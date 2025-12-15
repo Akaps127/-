@@ -145,6 +145,25 @@ def predict_rent(housing_type: str, deposit: float, area: float, year: int, floo
     )
     return float(y)
 
+def distance_to_station_idx(distance_m: float, decay_m: float = 500.0) -> float:
+    """
+    역까지거리(m) -> 역접근성지수(0~1) 변환 (지수감쇠)
+    기본: idx = exp(-distance/decay_m)
+    - distance=0m -> 1.0
+    - distance가 커질수록 0에 수렴
+    """
+    if distance_m is None:
+        return 0.0
+    try:
+        d = float(distance_m)
+    except Exception:
+        return 0.0
+    if np.isnan(d) or d < 0:
+        return 0.0
+    idx = float(np.exp(-d / float(decay_m)))
+    return float(np.clip(idx, 0.0, 1.0))
+
+
 def rent_range(housing_type: str, y_pred: float):
     band = ERROR_BAND[housing_type]
     return (y_pred - band, y_pred + band, band)
@@ -1175,7 +1194,13 @@ elif page == "적정 월세 계산기":
     with c5:
         floor = st.number_input("층", min_value=-5, max_value=200, value=10, step=1)
     with c6:
-        station_idx = st.slider("역 접근성 지수(0~1)", 0.0, 1.0, 0.60, 0.01)
+        distance_m = st.number_input("역까지거리(m)", min_value=0.0, value=500.0, step=10.0)
+
+    # (선택) 감쇠 스케일을 UI로 노출하고 싶으면 아래도 추가 가능
+    decay_m = 500.0  # 너희 지수감쇠 기준에 맞게 조정
+    station_idx = distance_to_station_idx(distance_m, decay_m=decay_m)
+
+    st.caption(f"✅ 입력 거리 {distance_m:.0f}m → 역접근성지수 {station_idx:.3f} (지수감쇠, decay={decay_m:.0f}m)")
 
     st.write("---")
     calc = st.button("적정 월세 계산")
